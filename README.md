@@ -1,6 +1,6 @@
 # Deteksi Tepi (Edge Detection)
 
-README ini membahas materi Deteksi Tepi (Edge Detection) untuk matakuliah Computer Vision, meliputi algoritma Prewitt, Roberts, Sobel, Isotropik, Laplacian, dan Canny. Deteksi tepi adalah proses penting dalam pengolahan citra digital untuk menemukan batas-batas objek dalam gambar.
+Operasi ini digunakan untuk menentukan lokasi titik-titik yang merupakan tepi obyek citra.Secara umum, tepi suatu obyek dalam citra dinyatakan sebagai titik yang nilai warnanya berbeda cukup besar dengan titik yang ada disebelahnya.
 
 ## 1. Prewitt
 
