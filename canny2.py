@@ -1,102 +1,119 @@
 import numpy as np
-from math import sqrt, atan2, pi
-from PIL import Image
+from scipy import ndimage
+import cv2
+import matplotlib.pyplot as plt
 
-# Parameter
+# Input & Output
 image_path = 'img/beras.jpg'
 output_canny = 'report/hasil_tepi_canny2.jpg'
-sigma = 1.4  # Gaussian blur
-low_thresh = 50
-high_thresh = 150
 
-# Baca citra hitam-putih
-img = Image.open(image_path).convert('L')
-img_array = np.array(img, dtype=float)
+# 1. Load image (sudah grayscale)
+img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+img_array = img.astype(float)
 
-# 1. Gaussian smoothing
-def gaussian_kernel(size=5, sigma=1.4):
-    k = size // 2
-    ax = np.arange(-k, k+1)
-    xx, yy = np.meshgrid(ax, ax)
-    kernel = np.exp(-(xx**2 + yy**2)/(2*sigma**2))
-    kernel /= 2*np.pi*sigma**2
-    kernel /= kernel.sum()
-    return kernel
+# 2. Gaussian blur
+blur_img = ndimage.gaussian_filter(img_array, sigma=1.0)
 
-def convolve(img, kernel):
-    m, n = kernel.shape
-    y, x = img.shape
-    pad_h, pad_w = m//2, n//2
-    img_padded = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='edge')
-    out = np.zeros_like(img)
-    for i in range(y):
-        for j in range(x):
-            region = img_padded[i:i+m, j:j+n]
-            out[i,j] = np.sum(region * kernel)
-    return out
+# 3. Gradient (Sobel)
+def gradient_x(img):
+    grad = ndimage.convolve(img, np.array([[-1, 0, 1],
+                                           [-2, 0, 2],
+                                           [-1, 0, 1]]))
+    return grad / np.max(np.abs(grad))
 
-img_smooth = convolve(img_array, gaussian_kernel(5, sigma))
+def gradient_y(img):
+    grad = ndimage.convolve(img, np.array([[-1, -2, -1],
+                                           [ 0,  0,  0],
+                                           [ 1,  2,  1]]))
+    return grad / np.max(np.abs(grad))
 
-# 2. Gradien (Sobel)
-Sobel_x = np.array([[-1,0,1],[-2,0,2],[-1,0,1]])
-Sobel_y = np.array([[-1,-2,-1],[0,0,0],[1,2,1]])
-Gx = convolve(img_smooth, Sobel_x)
-Gy = convolve(img_smooth, Sobel_y)
+fx = gradient_x(blur_img)
+fy = gradient_y(blur_img)
 
-# 3. Magnitude dan arah gradien
-G = np.hypot(Gx, Gy)
-G = (G / G.max()) * 255  # Normalisasi 0-255
-theta = np.arctan2(Gy, Gx) * 180 / pi
-theta[theta < 0] += 180
+# 4. Gradient magnitude & direction
+grad_mag = np.hypot(fx, fy)
+grad_mag = grad_mag / np.max(grad_mag)
+grad_dir = np.degrees(np.arctan2(fy, fx))
 
-# 4. Non-maximum suppression
-def non_max_suppression(G, theta):
-    Z = np.zeros_like(G)
-    rows, cols = G.shape
-    angle = theta.copy()
-    
-    for i in range(1, rows-1):
-        for j in range(1, cols-1):
-            q = r = 255
-            # Round angle to nearest 0, 45, 90, 135
-            a = angle[i,j]
-            if (0 <= a < 22.5) or (157.5 <= a <= 180):
-                q, r = G[i,j+1], G[i,j-1]
-            elif (22.5 <= a < 67.5):
-                q, r = G[i+1,j-1], G[i-1,j+1]
-            elif (67.5 <= a < 112.5):
-                q, r = G[i+1,j], G[i-1,j]
-            elif (112.5 <= a < 157.5):
-                q, r = G[i-1,j-1], G[i+1,j+1]
-            if (G[i,j] >= q) and (G[i,j] >= r):
-                Z[i,j] = G[i,j]
+# 5. Non-maximum suppression
+def closest_dir_function(grad_dir):
+    closest = np.zeros(grad_dir.shape)
+    for i in range(1, grad_dir.shape[0]-1):
+        for j in range(1, grad_dir.shape[1]-1):
+            a = grad_dir[i, j]
+            if ((-22.5 < a <= 22.5) or (a <= -157.5) or (a > 157.5)):
+                closest[i, j] = 0
+            elif ((22.5 < a <= 67.5) or (-157.5 < a <= -112.5)):
+                closest[i, j] = 45
+            elif ((67.5 < a <= 112.5) or (-112.5 < a <= -67.5)):
+                closest[i, j] = 90
             else:
-                Z[i,j] = 0
-    return Z
+                closest[i, j] = 135
+    return closest
 
-G_nms = non_max_suppression(G, theta)
+def non_maximal_suppressor(grad_mag, closest_dir):
+    thinned = np.zeros(grad_mag.shape)
+    for i in range(1, grad_mag.shape[0]-1):
+        for j in range(1, grad_mag.shape[1]-1):
+            if closest_dir[i, j] == 0:
+                if grad_mag[i, j] > grad_mag[i, j+1] and grad_mag[i, j] > grad_mag[i, j-1]:
+                    thinned[i, j] = grad_mag[i, j]
+            elif closest_dir[i, j] == 45:
+                if grad_mag[i, j] > grad_mag[i+1, j+1] and grad_mag[i, j] > grad_mag[i-1, j-1]:
+                    thinned[i, j] = grad_mag[i, j]
+            elif closest_dir[i, j] == 90:
+                if grad_mag[i, j] > grad_mag[i+1, j] and grad_mag[i, j] > grad_mag[i-1, j]:
+                    thinned[i, j] = grad_mag[i, j]
+            else:
+                if grad_mag[i, j] > grad_mag[i+1, j-1] and grad_mag[i, j] > grad_mag[i-1, j+1]:
+                    thinned[i, j] = grad_mag[i, j]
+    return thinned / np.max(thinned)
 
-# 5. Double threshold + hysteresis
-strong = 255
-weak = 75
-res = np.zeros_like(G_nms)
-res[G_nms >= high_thresh] = strong
-res[(G_nms >= low_thresh) & (G_nms < high_thresh)] = weak
+closest_dir = closest_dir_function(grad_dir)
+thinned_output = non_maximal_suppressor(grad_mag, closest_dir)
 
-# Hysteresis dengan iterasi sampai konvergen
-rows, cols = res.shape
-changed = True
-while changed:
-    changed = False
-    for i in range(1, rows-1):
-        for j in range(1, cols-1):
-            if res[i,j] == weak:
-                if np.any(res[i-1:i+2, j-1:j+2] == strong):
-                    res[i,j] = strong
-                    changed = True
-                else:
-                    res[i,j] = 0
+# 6. Hysteresis thresholding
+def DFS(img):
+    for i in range(1, img.shape[0]-1):
+        for j in range(1, img.shape[1]-1):
+            if img[i, j] == 1:
+                if np.max(img[i-1:i+2, j-1:j+2]) == 2:
+                    img[i, j] = 2
 
-# Simpan hasil
-Image.fromarray(res.astype(np.uint8)).save(output_canny)
-Image.fromarray(res.astype(np.uint8)).show()
+def hysteresis_thresholding(img):
+    low_ratio, high_ratio = 0.10, 0.30
+    diff = np.max(img) - np.min(img)
+    t_low = np.min(img) + low_ratio * diff
+    t_high = np.min(img) + high_ratio * diff
+    temp = np.copy(img)
+
+    for i in range(1, img.shape[0]-1):
+        for j in range(1, img.shape[1]-1):
+            if img[i, j] > t_high:
+                temp[i, j] = 2
+            elif img[i, j] < t_low:
+                temp[i, j] = 0
+            else:
+                temp[i, j] = 1
+
+    total_strong = np.sum(temp == 2)
+    while True:
+        DFS(temp)
+        if total_strong == np.sum(temp == 2):
+            break
+        total_strong = np.sum(temp == 2)
+
+    temp[temp == 1] = 0
+    return temp / np.max(temp)
+
+output_img = hysteresis_thresholding(thinned_output)
+
+# 7. Save hasil akhir pakai OpenCV
+output_img_uint8 = (output_img * 255).astype(np.uint8)
+cv2.imwrite(output_canny, output_img_uint8)
+
+# 8. Tampilkan hasil pakai matplotlib
+plt.imshow(output_img_uint8, cmap="gray")
+plt.axis("off")
+plt.title("Deteksi Tepi Canny")
+plt.show()
