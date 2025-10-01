@@ -25,6 +25,4 @@ for i in range(output.shape[0]):
     for j in range(output.shape[1]):
         output[i, j] = max(output[i, j], 0)
 
-
-# Menyimpan citra tepi ke file baru
 plt.imsave("report/hasil_tepi_roberts.jpg", output, cmap="gray")
